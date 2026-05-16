@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Amazon Bedrock Guardrails for the GenAI Underwriting Assistant.
+  Configures content filtering, topic denial, and PII handling for
+  responsible AI in insurance underwriting.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment
+
+  GuardrailName:
+    Type: String
+    Default: underwriting-assistant-guardrail
+    Description: Name of the Bedrock Guardrail
+
+Resources:
+
+  UnderwritingGuardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: !Sub '${GuardrailName}-${Environment}'
+      Description: >
+        Safety controls for the GenAI Underwriting Assistant. Enforces
+        content filtering, PII redaction, and topic denial for responsible
+        AI usage in insurance underwriting decisions.
+      BlockedInputMessaging: >
+        I'm unable to process this request. The input contains content
+        that falls outside my underwriting scope. Please rephrase your
+        question to focus on risk assessment, coverage recommendations,
+        or application review.
+      BlockedOutputsMessaging: >
+        I've generated a response that was filtered by our safety controls.
+        This typically happens when the response would include medical advice,
+        discriminatory factors, or competitor-specific information.
+        Please ask a more specific underwriting question.
+
+      # Content Filters - block harmful content
+      ContentPolicyConfig:
+        FiltersConfig:
+          - Type: HATE
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: INSULTS
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: SEXUAL
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: VIOLENCE
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: MISCONDUCT
+            InputStrength: MEDIUM
+            OutputStrength: HIGH
+          - Type: PROMPT_ATTACK
+            InputStrength: HIGH
+            OutputStrength: NONE
+
+      # Topic Denial - prevent out-of-scope responses
+      TopicPolicyConfig:
+        TopicsConfig:
+          - Name: MedicalDiagnosis
+            Definition: >
+              Providing specific medical diagnoses, treatment recommendations,
+              or health prognoses for insurance applicants. The assistant must
+              not act as a medical professional or suggest specific conditions.
+            Examples:
+              - 'Based on these symptoms, the applicant likely has diabetes'
+              - 'This applicant condition suggests a life expectancy of'
+              - 'The applicant should seek treatment for their cardiac condition'
+              - 'These lab results indicate the presence of'
+            Type: DENY
+          - Name: CompetitorInformation
+            Definition: >
+              Providing specific pricing, coverage details, or recommendations
+              about competitor insurance products or companies.
+            Examples:
+              - 'State Farm offers a better rate for this risk profile'
+              - 'Compared to Allstate policy, you should consider'
+              - 'The competitor combined ratio suggests their pricing is'
+              - 'Switch to Progressive for better coverage'
+            Type: DENY
+          - Name: DiscriminatoryFactors
+            Definition: >
+              Using protected class characteristics including race, religion,
+              national origin, genetic information, sexual orientation, or
+              disability status as underwriting factors.
+            Examples:
+              - 'Applicants from this neighborhood tend to have higher claims'
+              - 'Based on their ethnic background, the risk profile suggests'
+              - 'Genetic test results indicate higher mortality risk'
+              - 'Due to their religious practices, the risk is elevated'
+            Type: DENY
+          - Name: LegalAdvice
+            Definition: >
+              Providing specific legal advice about insurance coverage disputes,
+              regulatory compliance, or litigation strategy.
+            Examples:
+              - 'You should sue the policyholder for fraud'
+              - 'This claim denial will hold up in court because'
+              - 'File a complaint with the state insurance commissioner'
+            Type: DENY
+
+      # PII Handling - anonymize sensitive data
+      SensitiveInformationPolicyConfig:
+        PiiEntitiesConfig:
+          - Type: US_SOCIAL_SECURITY_NUMBER
+            Action: ANONYMIZE
+          - Type: CREDIT_DEBIT_CARD_NUMBER
+            Action: ANONYMIZE
+          - Type: US_BANK_ACCOUNT_NUMBER
+            Action: ANONYMIZE
+          - Type: US_BANK_ROUTING_NUMBER
+            Action: ANONYMIZE
+          - Type: EMAIL
+            Action: ANONYMIZE
+          - Type: PHONE
+            Action: ANONYMIZE
+          - Type: US_PASSPORT_NUMBER
+            Action: ANONYMIZE
+          - Type: DRIVER_ID
+            Action: ANONYMIZE
+          - Type: US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER
+            Action: ANONYMIZE
+
+      # Contextual grounding - reduce hallucination
+      ContextualGroundingPolicyConfig:
+        FiltersConfig:
+          - Type: GROUNDING
+            Threshold: 0.7
+          - Type: RELEVANCE
+            Threshold: 0.7
+
+      Tags:
+        - Key: Project
+          Value: genai-underwriting-assistant
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Guardrail Version for deployment
+  UnderwritingGuardrailVersion:
+    Type: AWS::Bedrock::GuardrailVersion
+    Properties:
+      GuardrailIdentifier: !GetAtt UnderwritingGuardrail.GuardrailId
+      Description: !Sub 'Initial version for ${Environment}'
+
+Outputs:
+  GuardrailId:
+    Description: Bedrock Guardrail ID
+    Value: !GetAtt UnderwritingGuardrail.GuardrailId
+    Export:
+      Name: !Sub '${AWS::StackName}-GuardrailId'
+
+  GuardrailArn:
+    Description: Bedrock Guardrail ARN
+    Value: !GetAtt UnderwritingGuardrail.GuardrailArn
+    Export:
+      Name: !Sub '${AWS::StackName}-GuardrailArn'
+
+  GuardrailVersion:
+    Description: Deployed Guardrail Version
+    Value: !GetAtt UnderwritingGuardrailVersion.Version
+    Export:
+      Name: !Sub '${AWS::StackName}-GuardrailVersion'
